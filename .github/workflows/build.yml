@@ -10,7 +10,13 @@ on:
 
 env:
   CMAKE_VERSION: '3.22.x'
-  NDK_VERSION: 'r26b'
+  # Ganti sesuai NDK yang tersedia:
+  #   r28c  → terbaru stabil (per ~2025)
+  #   r28b  → sama, patch minor
+  #   r27c  → LTS-ish, paling banyak dipakai
+  #   r30   → jika sudah rilis, tinggal ganti
+  NDK_VERSION: 'r28c'
+  ANDROID_API: '30'
 
 jobs:
   build-android:
@@ -20,28 +26,42 @@ jobs:
       fail-fast: false
       matrix:
         abi: [arm64-v8a, armeabi-v7a]
-        api: [26]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup NDK
+      - name: Setup NDK ${{ env.NDK_VERSION }}
+        id: ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: ${{ env.NDK_VERSION }}
           add-to-path: true
+
+      - name: Force ANDROID_NDK_HOME
+        run: |
+          NDK_PATH="${{ steps.ndk.outputs.ndk-path }}"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
+          echo "NDK path: $NDK_PATH"
+          ls "$NDK_PATH" | head
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
 
+      - name: Verify toolchain
+        run: |
+          CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          "$CC" --version | head -3
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=${{ matrix.abi }} \
-            -DANDROID_PLATFORM=android-${{ matrix.api }} \
+            -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
             -DANDROID_STL=c++_shared \
             -DCMAKE_BUILD_TYPE=Release \
             -DDF_BUILD_SHARED=ON \
@@ -53,6 +73,20 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -j
 
+      - name: Verify artifacts
+        run: |
+          echo "=== Libraries ==="
+          ls -la build/libdisplayfeature* 2>/dev/null || true
+          echo "=== Binaries ==="
+          ls -la build/dfc-cli build/c-demo 2>/dev/null || true
+          echo "=== File types ==="
+          file build/libdisplayfeature.so 2>/dev/null || true
+          file build/libdisplayfeature.a  2>/dev/null || true
+          file build/dfc-cli 2>/dev/null || true
+          echo "=== Symbols (sanity: harus ada df_client_create) ==="
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" \
+            -D build/libdisplayfeature.so 2>/dev/null | grep -E "df_client_create|df_set_reading" || true
+
       - name: Install staging
         run: |
           cmake --install build --prefix stage
@@ -60,14 +94,14 @@ jobs:
 
       - name: Package
         run: |
-          PKG=libdisplayfeature-${{ matrix.abi }}-api${{ matrix.api }}
+          PKG=libdisplayfeature-${{ matrix.abi }}-api${{ env.ANDROID_API }}
           mkdir -p dist/$PKG
           cp -r stage/* dist/$PKG/
           cd dist && tar czf $PKG.tar.gz $PKG
 
       - uses: actions/upload-artifact@v4
         with:
-          name: libdisplayfeature-${{ matrix.abi }}-api${{ matrix.api }}
+          name: libdisplayfeature-${{ matrix.abi }}-api${{ env.ANDROID_API }}
           path: dist/*.tar.gz
           if-no-files-found: error
 

@@ -50,10 +50,18 @@ set(DF_SOURCES
     src/hal_bridge.cpp
 )
 
-# ---- Flags (FIXED: hapus -fvisibility=hidden) ----
-# Catatan: fvisibility=hidden dihapus karena memblokir ekspor symbol
-# publik C API & C++ Client. Untuk versi production nanti, gunakan
-# DF_API macro untuk kontrol ekspor yang lebih halus.
+# =============================================================
+# FLAGS
+# =============================================================
+# PENTING: JANGAN tambahkan -fPIE atau -fPIC di sini.
+#
+# CMake akan otomatis menambahkan:
+#   -fPIC  → untuk SHARED library (via POSITION_INDEPENDENT_CODE ON)
+#   -fPIE  → untuk EXECUTABLE di Android (default dari NDK toolchain)
+#
+# Kalau kita paksa -fPIE di common flags, dia menimpa -fPIC yang
+# CMake tambahkan untuk shared library → linker error R_AARCH64_*.
+# =============================================================
 set(DF_COMMON_FLAGS
     -Wall
     -Wextra
@@ -61,7 +69,7 @@ set(DF_COMMON_FLAGS
 )
 
 if(ANDROID)
-    list(APPEND DF_COMMON_FLAGS -fPIE -fstack-protector-strong)
+    list(APPEND DF_COMMON_FLAGS -fstack-protector-strong)
     set(DF_PLATFORM_ANDROID TRUE)
 else()
     set(DF_PLATFORM_ANDROID FALSE)
@@ -78,9 +86,11 @@ function(df_configure_target tgt)
             ${DF_PRIVATE_INCLUDE}
     )
     target_compile_options(${tgt} PRIVATE ${DF_COMMON_FLAGS})
+
     if(DF_PLATFORM_ANDROID)
         target_compile_definitions(${tgt} PRIVATE DF_PLATFORM_ANDROID=1)
     endif()
+
     if(DF_DISABLE_ANDROID_LOG)
         target_compile_definitions(${tgt} PRIVATE DF_DISABLE_ANDROID_LOG=1)
     else()
@@ -90,17 +100,16 @@ function(df_configure_target tgt)
             target_compile_definitions(${tgt} PRIVATE DF_HAVE_ANDROID_LOG=1)
         endif()
     endif()
+
     find_library(DL_LIB dl)
     if(DL_LIB)
         target_link_libraries(${tgt} PRIVATE ${DL_LIB})
     endif()
+
     target_compile_definitions(${tgt} PRIVATE
         DF_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
         DF_VERSION_MINOR=${PROJECT_VERSION_MINOR}
         DF_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    )
-    set_target_properties(${tgt} PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
     )
 endfunction()
 
@@ -112,6 +121,10 @@ if(DF_BUILD_SHARED)
         OUTPUT_NAME "displayfeature"
         VERSION     ${PROJECT_VERSION}
         SOVERSION   ${PROJECT_VERSION_MAJOR}
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET       default
+        CXX_VISIBILITY_PRESET     default
+        VISIBILITY_INLINES_HIDDEN OFF
     )
     add_library(displayfeature::shared ALIAS displayfeature)
 endif()
@@ -122,6 +135,7 @@ if(DF_BUILD_STATIC)
     df_configure_target(displayfeature_static)
     set_target_properties(displayfeature_static PROPERTIES
         OUTPUT_NAME "displayfeature"
+        POSITION_INDEPENDENT_CODE ON
     )
     add_library(displayfeature::static ALIAS displayfeature_static)
 endif()
@@ -137,6 +151,7 @@ if(DF_BUILD_JNI AND ANDROID)
     endif()
     set_target_properties(displayfeature_jni PROPERTIES
         OUTPUT_NAME "displayfeature_jni"
+        POSITION_INDEPENDENT_CODE ON
     )
 endif()
 
