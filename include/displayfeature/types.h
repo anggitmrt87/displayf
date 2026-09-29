@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +27,7 @@ typedef enum df_error {
 } df_error_t;
 
 /* ===================================================================
- * Feature case ID (dari analysis strings DisplayFeatureHal.cpp)
+ * Feature case ID
  * =================================================================== */
 
 typedef enum df_case {
@@ -71,10 +72,10 @@ typedef enum df_color_scheme {
  * =================================================================== */
 
 typedef enum df_backend {
-    DF_BACKEND_AUTO     = 0,   /* auto-detect */
-    DF_BACKEND_HIDL     = 1,   /* direct HIDL (butuh libbinder) */
-    DF_BACKEND_SERVICE  = 2,   /* via `service call` shell */
-    DF_BACKEND_SYSFS    = 3,   /* direct sysfs (backlight only) */
+    DF_BACKEND_AUTO     = 0,
+    DF_BACKEND_HIDL     = 1,
+    DF_BACKEND_SERVICE  = 2,
+    DF_BACKEND_SYSFS    = 3,
 } df_backend_t;
 
 /* ===================================================================
@@ -116,6 +117,90 @@ typedef struct df_state {
  * =================================================================== */
 
 typedef struct df_client df_client_t;
+
+/* ===================================================================
+ * Transaction codes untuk framework service "displayfeature"
+ * (hasil probe v3)
+ * =================================================================== */
+
+enum df_tx {
+    DF_TX_GET_CAPABILITIES             = 1,
+    DF_TX_REGISTER_READ_APP_LISTENER   = 2,
+    DF_TX_SET_EYECARE_SWITCH           = 3,
+    DF_TX_GET_READ_APP_LIST            = 4,
+    DF_TX_GET_GAME_APP_LIST            = 5,
+    DF_TX_UNREG_READ_APP_LISTENER      = 6,
+    DF_TX_REGISTER_DF_CALLBACK         = 7,
+    DF_TX_UNREGISTER_DF_CALLBACK       = 8,
+    DF_TX_GET_ALL_EFFECT_SCOPE_APPS    = 9,
+    DF_TX_10                           = 10,
+};
+
+/* Alias tanpa prefix DF_ untuk kompatibilitas */
+#define TX_GET_CAPABILITIES             DF_TX_GET_CAPABILITIES
+#define TX_REGISTER_READ_APP_LISTENER   DF_TX_REGISTER_READ_APP_LISTENER
+#define TX_SET_EYECARE_SWITCH           DF_TX_SET_EYECARE_SWITCH
+#define TX_GET_READ_APP_LIST            DF_TX_GET_READ_APP_LIST
+#define TX_GET_GAME_APP_LIST            DF_TX_GET_GAME_APP_LIST
+#define TX_UNREG_READ_APP_LISTENER      DF_TX_UNREG_READ_APP_LISTENER
+#define TX_REGISTER_DF_CALLBACK         DF_TX_REGISTER_DF_CALLBACK
+#define TX_UNREGISTER_DF_CALLBACK       DF_TX_UNREGISTER_DF_CALLBACK
+#define TX_GET_ALL_EFFECT_SCOPE_APPS    DF_TX_GET_ALL_EFFECT_SCOPE_APPS
+
+/* ===================================================================
+ * Path sysfs
+ * =================================================================== */
+
+#ifndef DF_BACKLIGHT_PATH
+#define DF_BACKLIGHT_PATH \
+    "/sys/class/backlight/panel0-backlight/brightness"
+#endif
+
+#ifndef DF_MAX_BRIGHTNESS_PATH
+#define DF_MAX_BRIGHTNESS_PATH \
+    "/sys/class/backlight/panel0-backlight/max_brightness"
+#endif
+
+#ifndef DF_PANEL_INFO_PATH
+#define DF_PANEL_INFO_PATH \
+    "/sys/class/drm/card0-DSI-1/panel_info"
+#endif
+
+/* Alias supaya kompatibel dengan client.cpp */
+#define BACKLIGHT_PATH       DF_BACKLIGHT_PATH
+#define MAX_BRIGHTNESS_PATH  DF_MAX_BRIGHTNESS_PATH
+
+/* ===================================================================
+ * Service names
+ * =================================================================== */
+
+#ifndef DF_SERVICE_NAME
+#define DF_SERVICE_NAME "displayfeature"
+#endif
+
+#ifndef DF_SERVICE_INTERFACE
+#define DF_SERVICE_INTERFACE \
+    "miui.hardware.display.IDisplayFeatureManager"
+#endif
+
+#ifndef DF_HIDL_INTERFACE
+#define DF_HIDL_INTERFACE \
+    "vendor.xiaomi.hardware.displayfeature@1.0::IDisplayFeature"
+#endif
+
+/* Alias tanpa DF_ */
+#define SERVICE_NAME       DF_SERVICE_NAME
+#define SERVICE_INTERFACE  DF_SERVICE_INTERFACE
+#define HIDL_INTERFACE     DF_HIDL_INTERFACE
+
+/* ===================================================================
+ * Device codename
+ * =================================================================== */
+
+#define DF_DEVICE_LIME    "lime"
+#define DF_DEVICE_LEMON   "lemon"
+#define DF_DEVICE_POMELO  "pomelo"
+#define DF_DEVICE_CITRUS  "citrus"
 
 #ifdef __cplusplus
 } /* extern "C" */
