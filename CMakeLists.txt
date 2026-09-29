@@ -6,8 +6,6 @@ project(libdisplayfeature
     LANGUAGES C CXX
 )
 
-# GNUInstallDirs harus di-include sebelum helper, karena kita butuh
-# CMAKE_INSTALL_INCLUDEDIR untuk INSTALL_INTERFACE generator expression.
 include(GNUInstallDirs)
 
 # ---- Options ----
@@ -52,13 +50,14 @@ set(DF_SOURCES
     src/hal_bridge.cpp
 )
 
-# ---- Flags ----
+# ---- Flags (FIXED: hapus -fvisibility=hidden) ----
+# Catatan: fvisibility=hidden dihapus karena memblokir ekspor symbol
+# publik C API & C++ Client. Untuk versi production nanti, gunakan
+# DF_API macro untuk kontrol ekspor yang lebih halus.
 set(DF_COMMON_FLAGS
     -Wall
     -Wextra
     -Wno-unused-parameter
-    -fvisibility=hidden
-    -fvisibility-inlines-hidden
 )
 
 if(ANDROID)
@@ -68,7 +67,7 @@ else()
     set(DF_PLATFORM_ANDROID FALSE)
 endif()
 
-# ---- Helper (FIXED) ----
+# ---- Helper ----
 function(df_configure_target tgt)
     target_include_directories(${tgt}
         PUBLIC
@@ -101,9 +100,6 @@ function(df_configure_target tgt)
         DF_VERSION_PATCH=${PROJECT_VERSION_PATCH}
     )
     set_target_properties(${tgt} PROPERTIES
-        C_VISIBILITY_PRESET   hidden
-        CXX_VISIBILITY_PRESET hidden
-        VISIBILITY_INLINES_HIDDEN ON
         POSITION_INDEPENDENT_CODE ON
     )
 endfunction()
@@ -136,6 +132,8 @@ if(DF_BUILD_JNI AND ANDROID)
     df_configure_target(displayfeature_jni)
     if(DF_BUILD_SHARED)
         target_link_libraries(displayfeature_jni PRIVATE displayfeature)
+    elseif(DF_BUILD_STATIC)
+        target_link_libraries(displayfeature_jni PRIVATE displayfeature_static)
     endif()
     set_target_properties(displayfeature_jni PROPERTIES
         OUTPUT_NAME "displayfeature_jni"
@@ -162,10 +160,9 @@ if(DF_BUILD_EXAMPLES)
 endif()
 
 # =============================================================
-# Install (FIXED)
+# Install
 # =============================================================
 
-# Kumpulkan target yang akan diexport
 set(DF_INSTALL_TARGETS)
 if(DF_BUILD_SHARED)
     list(APPEND DF_INSTALL_TARGETS displayfeature)
@@ -177,7 +174,6 @@ if(DF_BUILD_JNI AND ANDROID)
     list(APPEND DF_INSTALL_TARGETS displayfeature_jni)
 endif()
 
-# Install target + daftarkan ke export set
 if(DF_INSTALL_TARGETS)
     install(TARGETS ${DF_INSTALL_TARGETS}
         EXPORT displayfeatureTargets
@@ -188,7 +184,6 @@ if(DF_INSTALL_TARGETS)
     )
 endif()
 
-# Install header
 install(DIRECTORY include/displayfeature/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/displayfeature
     FILES_MATCHING PATTERN "*.h"
@@ -199,7 +194,6 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/displayfeature
 )
 
-# Install examples binary
 if(DF_BUILD_EXAMPLES)
     install(TARGETS dfc-cli c-demo
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -226,7 +220,6 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/displayfeature
 )
 
-# Export target (hanya jika ada yang diinstall)
 if(DF_INSTALL_TARGETS)
     install(EXPORT displayfeatureTargets
         NAMESPACE displayfeature::
