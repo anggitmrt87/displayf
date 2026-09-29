@@ -18,6 +18,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <cstring>
+#include <unistd.h>       /* FIX: untuk access() dan R_OK */
 
 #include "hw_module.h"
 #include "symbol_resolver.h"
@@ -56,14 +57,12 @@ struct OrigHandle {
 
 static OrigHandle g_orig;
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
-static bool g_init_done = false;
 
 /* ===================================================================
  * Cari path original yang benar
  * =================================================================== */
 
 static const char* find_orig_path() {
-    /* Coba semua kandidat, pakai yang pertama bisa diakses */
     const char* candidates[] = {
         ORIG_PATH_64,
         ORIG_PATH_FALLBACK_64,
@@ -104,10 +103,9 @@ static void load_orig() {
         "HMI",
         "HAL_MODULE_INFO_SYM",
         "hmi",
-        "_ZL3HMIPK11hw_module_t",   /* C++ mangled, internal linkage */
         nullptr
     };
-    g_orig.module = (hw_module_t*)resolve_first(g_orig.dl, mod_syms, 4);
+    g_orig.module = (hw_module_t*)resolve_first(g_orig.dl, mod_syms, 3);
     if (!g_orig.module) {
         LOGE("HAL_MODULE_INFO_SYM not found in original");
         dlclose(g_orig.dl);
@@ -124,9 +122,9 @@ static void load_orig() {
     LOGI("  module   = %p", g_orig.module);
     LOGI("  methods  = %p", g_orig.methods);
     LOGI("  open     = %p", g_orig.open);
-    LOGI("  id       = %s", g_orig.module->id    ? g_orig.module->id    : "(null)");
-    LOGI("  name     = %s", g_orig.module->name  ? g_orig.module->name  : "(null)");
-    LOGI("  author   = %s", g_orig.module->author? g_orig.module->author: "(null)");
+    LOGI("  id       = %s", g_orig.module->id     ? g_orig.module->id     : "(null)");
+    LOGI("  name     = %s", g_orig.module->name   ? g_orig.module->name   : "(null)");
+    LOGI("  author   = %s", g_orig.module->author ? g_orig.module->author : "(null)");
 
     /* Beritahu hook_hal tentang original open */
     set_original_open(g_orig.open);
@@ -134,7 +132,6 @@ static void load_orig() {
 
 static void ensure_orig_loaded() {
     pthread_once(&g_once, load_orig);
-    g_init_done = true;
 }
 
 /* ===================================================================
@@ -150,8 +147,12 @@ extern "C" int df_hooked_open(const hw_module_t* module, const char* id,
 /* ===================================================================
  * Export HAL_MODULE_INFO_SYM
  *
- * Ini adalah symbol yang dibaca hw_get_module() untuk menemukan module.
- * Kita export dengan nama yang sama persis.
+ * CATATAN: macro HAL_MODULE_INFO_SYM di-expand ke "HMI" oleh hw_module.h.
+ * Kita tidak bisa mendefinisikan `hw_module_t* HAL_MODULE_INFO_SYM`
+ * karena akan bentrok dengan `hw_module_t HMI` di atasnya.
+ *
+ * Cukup definisikan HMI saja — sistem yang memakai `hw_get_module()`
+ * akan mencari symbol "HMI" itu sendiri.
  * =================================================================== */
 
 extern "C" {
@@ -172,10 +173,6 @@ hw_module_t HMI = {
     .dso                = nullptr,
     .reserved           = {0},
 };
-
-/* Alias: beberapa versi Android mencari dengan nama ini */
-__attribute__((visibility("default"), used))
-hw_module_t* HAL_MODULE_INFO_SYM = &HMI;
 
 /* ===================================================================
  * Constructor & destructor
