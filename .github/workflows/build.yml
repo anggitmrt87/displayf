@@ -1,4 +1,4 @@
-name: Build libdisplayfeature
+name: Build DisplayFeature Hook
 
 on:
   push:
@@ -9,18 +9,13 @@ on:
   workflow_dispatch:
 
 env:
-  CMAKE_VERSION: '3.22.x'
-  # Ganti sesuai NDK yang tersedia:
-  #   r28c  → terbaru stabil (per ~2025)
-  #   r28b  → sama, patch minor
-  #   r27c  → LTS-ish, paling banyak dipakai
-  #   r30   → jika sudah rilis, tinggal ganti
   NDK_VERSION: 'r28c'
   ANDROID_API: '30'
+  CMAKE_VERSION: '3.22.x'
 
 jobs:
-  build-android:
-    name: Android ${{ matrix.abi }}
+  build-hook:
+    name: Build ${{ matrix.abi }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -37,24 +32,20 @@ jobs:
           ndk-version: ${{ env.NDK_VERSION }}
           add-to-path: true
 
-      - name: Force ANDROID_NDK_HOME
+      - name: Force NDK env
         run: |
-          NDK_PATH="${{ steps.ndk.outputs.ndk-path }}"
-          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
-          echo "NDK path: $NDK_PATH"
-          ls "$NDK_PATH" | head
+          echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=${{ steps.ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+          echo "NDK: ${{ steps.ndk.outputs.ndk-path }}"
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
 
-      - name: Verify toolchain
+      - name: Show toolchain
         run: |
-          CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-          "$CC" --version | head -3
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version | head -2
 
       - name: Configure
         run: |
@@ -62,91 +53,70 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=${{ matrix.abi }} \
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
-            -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DDF_BUILD_SHARED=ON \
-            -DDF_BUILD_STATIC=ON \
-            -DDF_BUILD_JNI=ON \
-            -DDF_BUILD_EXAMPLES=ON \
-            -DDF_BUILD_CLI=ON
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release -j
 
-      - name: Verify artifacts
+      - name: Verify
         run: |
-          echo "=== Libraries ==="
-          ls -la build/libdisplayfeature* 2>/dev/null || true
-          echo "=== Binaries ==="
-          ls -la build/dfc-cli build/c-demo 2>/dev/null || true
-          echo "=== File types ==="
-          file build/libdisplayfeature.so 2>/dev/null || true
-          file build/libdisplayfeature.a  2>/dev/null || true
-          file build/dfc-cli 2>/dev/null || true
-          echo "=== Symbols (sanity: harus ada df_client_create) ==="
-          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" \
-            -D build/libdisplayfeature.so 2>/dev/null | grep -E "df_client_create|df_set_reading" || true
+          echo "=== Files ==="
+          ls -la build/displayfeature.default.so || true
+          ls -la build/dump_symbols || true
+          echo "=== Type ==="
+          file build/displayfeature.default.so || true
+          echo "=== Exported symbols ==="
+          NM="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          "$NM" -D build/displayfeature.default.so 2>/dev/null | \
+            grep -E " (HMI|hooked_open|HAL_MODULE_INFO_SYM)" || echo "(no symbols yet)"
 
-      - name: Install staging
+      - name: Prepare artifact
         run: |
-          cmake --install build --prefix stage
-          find stage -type f -exec ls -la {} \;
-
-      - name: Package
-        run: |
-          PKG=libdisplayfeature-${{ matrix.abi }}-api${{ env.ANDROID_API }}
-          mkdir -p dist/$PKG
-          cp -r stage/* dist/$PKG/
-          cd dist && tar czf $PKG.tar.gz $PKG
+          mkdir -p dist
+          cp build/displayfeature.default.so \
+             dist/displayfeature.default-${{ matrix.abi }}.so
+          [ -f build/dump_symbols ] && \
+            cp build/dump_symbols dist/dump_symbols-${{ matrix.abi }} || true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: libdisplayfeature-${{ matrix.abi }}-api${{ env.ANDROID_API }}
-          path: dist/*.tar.gz
+          name: hook-${{ matrix.abi }}
+          path: dist/*
           if-no-files-found: error
 
-  build-host:
-    name: Host (Linux x86_64)
+  package-magisk:
+    name: Package Magisk module
+    needs: build-hook
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
+      - uses: actions/download-artifact@v4
         with:
-          cmake-version: ${{ env.CMAKE_VERSION }}
+          name: hook-arm64-v8a
+          path: artifacts/arm64
 
-      - name: Configure
+      - uses: actions/download-artifact@v4
+        with:
+          name: hook-armeabi-v7a
+          path: artifacts/arm32
+        continue-on-error: true
+
+      - name: Build Magisk zip
         run: |
-          cmake -S . -B build-host \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DDF_BUILD_SHARED=ON \
-            -DDF_BUILD_STATIC=ON \
-            -DDF_BUILD_EXAMPLES=ON \
-            -DDF_BUILD_CLI=ON \
-            -DDF_DISABLE_ANDROID_LOG=ON
-
-      - name: Build
-        run: cmake --build build-host -j
-
-      - name: Install staging
-        run: cmake --install build-host --prefix stage-host
-
-      - name: Package
-        run: |
-          PKG=libdisplayfeature-host-x86_64
-          mkdir -p dist/$PKG
-          cp -r stage-host/* dist/$PKG/
-          cd dist && tar czf $PKG.tar.gz $PKG
+          chmod +x scripts/package_magisk.sh
+          ./scripts/package_magisk.sh artifacts
 
       - uses: actions/upload-artifact@v4
         with:
-          name: libdisplayfeature-host-x86_64
-          path: dist/*.tar.gz
+          name: DisplayFeatureHook-Magisk
+          path: DisplayFeatureHook.zip
+          if-no-files-found: error
 
   release:
     name: Release
-    needs: [build-android, build-host]
+    needs: [build-hook, package-magisk]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -156,13 +126,14 @@ jobs:
         with:
           path: artifacts
 
-      - name: Package all
+      - name: Prepare release files
         run: |
           mkdir -p release
-          find artifacts -name '*.tar.gz' -exec cp {} release/ \;
+          find artifacts -name '*.so' -exec cp {} release/ \;
+          find artifacts -name '*.zip' -exec cp {} release/ \;
           ls -la release/
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: release/*.tar.gz
+          files: release/*
           generate_release_notes: true

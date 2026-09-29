@@ -1,0 +1,30 @@
+# Build
+build/
+build-*/
+dist/
+stage/
+stage-*/
+
+# Vendor libs (jangan commit, besar & copyrighted)
+vendor_libs/
+analyzed/
+
+# Magisk
+DisplayFeatureHook.zip
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+compile_commands.json

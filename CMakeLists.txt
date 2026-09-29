@@ -1,24 +1,12 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(libdisplayfeature
+project(displayfeature_hook
     VERSION 1.0.0
-    DESCRIPTION "DisplayFeature client library for Xiaomi SM6115 devices"
+    DESCRIPTION "DisplayFeature HAL interposer for Xiaomi SM6115"
     LANGUAGES C CXX
 )
 
-include(GNUInstallDirs)
-
-# ---- Options ----
-option(DF_BUILD_SHARED        "Build shared library"   ON)
-option(DF_BUILD_STATIC        "Build static library"   ON)
-option(DF_BUILD_JNI           "Build JNI bridge"       OFF)
-option(DF_BUILD_EXAMPLES      "Build examples"         ON)
-option(DF_BUILD_CLI           "Build CLI binary"       ON)
-option(DF_DISABLE_ANDROID_LOG "Disable Android log"    OFF)
-option(DF_ENABLE_TESTS        "Build tests"            OFF)
-
 # ---- Standard ----
-set(CMAKE_C_STANDARD   11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -27,218 +15,89 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ---- Version header ----
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/displayfeature/version.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/include/displayfeature/version.h
-    @ONLY
+# ---- Options ----
+option(HOOK_VERBOSE "Enable verbose logging" OFF)
+
+# =============================================================
+# Library: interposer (displayfeature.default.so)
+# =============================================================
+
+add_library(displayfeature_hook SHARED
+    src/interposer.cpp
+    src/hook_hal.cpp
+    src/symbol_resolver.cpp
 )
 
-# ---- Path variables ----
-set(DF_PUBLIC_INCLUDE
+target_include_directories(displayfeature_hook PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
-)
-set(DF_PRIVATE_INCLUDE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-# ---- Sources ----
-set(DF_SOURCES
-    src/client.cpp
-    src/c_api.cpp
-    src/hal_bridge.cpp
-)
-
-# =============================================================
-# FLAGS
-# =============================================================
-# PENTING: JANGAN tambahkan -fPIE atau -fPIC di sini.
-#
-# CMake akan otomatis menambahkan:
-#   -fPIC  → untuk SHARED library (via POSITION_INDEPENDENT_CODE ON)
-#   -fPIE  → untuk EXECUTABLE di Android (default dari NDK toolchain)
-#
-# Kalau kita paksa -fPIE di common flags, dia menimpa -fPIC yang
-# CMake tambahkan untuk shared library → linker error R_AARCH64_*.
-# =============================================================
-set(DF_COMMON_FLAGS
+target_compile_options(displayfeature_hook PRIVATE
     -Wall
     -Wextra
     -Wno-unused-parameter
+    -fPIC
+    -fvisibility=default
+    -fno-exceptions
+    -fno-rtti
 )
 
-if(ANDROID)
-    list(APPEND DF_COMMON_FLAGS -fstack-protector-strong)
-    set(DF_PLATFORM_ANDROID TRUE)
-else()
-    set(DF_PLATFORM_ANDROID FALSE)
+target_compile_definitions(displayfeature_hook PRIVATE
+    LOG_TAG="df-hook"
+)
+
+if(HOOK_VERBOSE)
+    target_compile_definitions(displayfeature_hook PRIVATE HOOK_VERBOSE=1)
 endif()
 
-# ---- Helper ----
-function(df_configure_target tgt)
-    target_include_directories(${tgt}
-        PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-        PRIVATE
-            ${DF_PRIVATE_INCLUDE}
-    )
-    target_compile_options(${tgt} PRIVATE ${DF_COMMON_FLAGS})
-
-    if(DF_PLATFORM_ANDROID)
-        target_compile_definitions(${tgt} PRIVATE DF_PLATFORM_ANDROID=1)
-    endif()
-
-    if(DF_DISABLE_ANDROID_LOG)
-        target_compile_definitions(${tgt} PRIVATE DF_DISABLE_ANDROID_LOG=1)
-    else()
-        find_library(LOG_LIB log)
-        if(LOG_LIB)
-            target_link_libraries(${tgt} PRIVATE ${LOG_LIB})
-            target_compile_definitions(${tgt} PRIVATE DF_HAVE_ANDROID_LOG=1)
-        endif()
-    endif()
-
-    find_library(DL_LIB dl)
-    if(DL_LIB)
-        target_link_libraries(${tgt} PRIVATE ${DL_LIB})
-    endif()
-
-    target_compile_definitions(${tgt} PRIVATE
-        DF_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-        DF_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-        DF_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    )
-endfunction()
-
-# ---- Shared ----
-if(DF_BUILD_SHARED)
-    add_library(displayfeature SHARED ${DF_SOURCES})
-    df_configure_target(displayfeature)
-    set_target_properties(displayfeature PROPERTIES
-        OUTPUT_NAME "displayfeature"
-        VERSION     ${PROJECT_VERSION}
-        SOVERSION   ${PROJECT_VERSION_MAJOR}
-        POSITION_INDEPENDENT_CODE ON
-        C_VISIBILITY_PRESET       default
-        CXX_VISIBILITY_PRESET     default
-        VISIBILITY_INLINES_HIDDEN OFF
-    )
-    add_library(displayfeature::shared ALIAS displayfeature)
+# Link liblog & libdl
+find_library(LOG_LIB log)
+find_library(DL_LIB dl)
+if(LOG_LIB)
+    target_link_libraries(displayfeature_hook PRIVATE ${LOG_LIB})
+endif()
+if(DL_LIB)
+    target_link_libraries(displayfeature_hook PRIVATE ${DL_LIB})
 endif()
 
-# ---- Static ----
-if(DF_BUILD_STATIC)
-    add_library(displayfeature_static STATIC ${DF_SOURCES})
-    df_configure_target(displayfeature_static)
-    set_target_properties(displayfeature_static PROPERTIES
-        OUTPUT_NAME "displayfeature"
-        POSITION_INDEPENDENT_CODE ON
-    )
-    add_library(displayfeature::static ALIAS displayfeature_static)
+# Output name harus persis "displayfeature.default.so"
+set_target_properties(displayfeature_hook PROPERTIES
+    OUTPUT_NAME "displayfeature.default"
+    PREFIX ""
+    SUFFIX ".so"
+    POSITION_INDEPENDENT_CODE ON
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+)
+
+# =============================================================
+# Utility: dump_symbols
+# =============================================================
+
+add_executable(dump_symbols src/dump_symbols.cpp)
+target_include_directories(dump_symbols PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_compile_options(dump_symbols PRIVATE
+    -Wall -Wextra -Wno-unused-parameter
+)
+if(DL_LIB)
+    target_link_libraries(dump_symbols PRIVATE ${DL_LIB})
 endif()
-
-# ---- JNI ----
-if(DF_BUILD_JNI AND ANDROID)
-    add_library(displayfeature_jni SHARED src/jni_bridge.cpp)
-    df_configure_target(displayfeature_jni)
-    if(DF_BUILD_SHARED)
-        target_link_libraries(displayfeature_jni PRIVATE displayfeature)
-    elseif(DF_BUILD_STATIC)
-        target_link_libraries(displayfeature_jni PRIVATE displayfeature_static)
-    endif()
-    set_target_properties(displayfeature_jni PROPERTIES
-        OUTPUT_NAME "displayfeature_jni"
-        POSITION_INDEPENDENT_CODE ON
-    )
-endif()
-
-# ---- Examples ----
-if(DF_BUILD_EXAMPLES)
-    add_executable(dfc-cli examples/cli.cpp)
-    target_include_directories(dfc-cli PRIVATE ${DF_PUBLIC_INCLUDE})
-    if(DF_BUILD_SHARED)
-        target_link_libraries(dfc-cli PRIVATE displayfeature)
-    elseif(DF_BUILD_STATIC)
-        target_link_libraries(dfc-cli PRIVATE displayfeature_static)
-    endif()
-
-    add_executable(c-demo examples/c_demo.c)
-    target_include_directories(c-demo PRIVATE ${DF_PUBLIC_INCLUDE})
-    if(DF_BUILD_SHARED)
-        target_link_libraries(c-demo PRIVATE displayfeature)
-    elseif(DF_BUILD_STATIC)
-        target_link_libraries(c-demo PRIVATE displayfeature_static)
-    endif()
+if(LOG_LIB)
+    target_link_libraries(dump_symbols PRIVATE ${LOG_LIB})
 endif()
 
 # =============================================================
 # Install
 # =============================================================
 
-set(DF_INSTALL_TARGETS)
-if(DF_BUILD_SHARED)
-    list(APPEND DF_INSTALL_TARGETS displayfeature)
-endif()
-if(DF_BUILD_STATIC)
-    list(APPEND DF_INSTALL_TARGETS displayfeature_static)
-endif()
-if(DF_BUILD_JNI AND ANDROID)
-    list(APPEND DF_INSTALL_TARGETS displayfeature_jni)
-endif()
+include(GNUInstallDirs)
 
-if(DF_INSTALL_TARGETS)
-    install(TARGETS ${DF_INSTALL_TARGETS}
-        EXPORT displayfeatureTargets
-        LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-endif()
-
-install(DIRECTORY include/displayfeature/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/displayfeature
-    FILES_MATCHING PATTERN "*.h"
-    PATTERN "version.h.in" EXCLUDE
+install(TARGETS displayfeature_hook
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/hw
 )
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/include/displayfeature/version.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/displayfeature
+install(TARGETS dump_symbols
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-if(DF_BUILD_EXAMPLES)
-    install(TARGETS dfc-cli c-demo
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
-endif()
-
-# ---- CMake package config ----
-include(CMakePackageConfigHelpers)
-
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/displayfeatureConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/displayfeatureConfig.cmake
-"include(CMakeFindDependencyMacro)
-include(\"\${CMAKE_CURRENT_LIST_DIR}/displayfeatureTargets.cmake\")
-")
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/displayfeatureConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/displayfeatureConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/displayfeature
-)
-
-if(DF_INSTALL_TARGETS)
-    install(EXPORT displayfeatureTargets
-        NAMESPACE displayfeature::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/displayfeature
-        FILE displayfeatureTargets.cmake
-    )
-endif()

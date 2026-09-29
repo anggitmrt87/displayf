@@ -1,0 +1,6 @@
+id=displayfeature_hook
+name=DisplayFeature HAL Hook
+version=1.0.0
+versionCode=1
+author=anggitmrt87
+description=Hook displayfeature.default.so untuk Redmi 9T (lime/lemon/pomelo/citrus)
